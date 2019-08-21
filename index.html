@@ -64,7 +64,16 @@ class: center, middle
 * Do less work
 * Allocate less things
 * Clean up after yourself
-* Measure speed over and over (JIT is tempermental)
+---
+# Measuring is Hard
+* Variance is high between measurements
+* Functions are inlined sometimes but not others
+* Different optimizations triggered based on browser heuristics
+---
+# Measuring is Hard (pt. 2)
+* Are you measuring time to first paint, navigating around your app? Both?
+* Ever noticed some features are slower with the dev tools open?
+* The Chrome profiler has come a long way. Use it!
 ---
 # Ember Performance Suite
 
@@ -72,36 +81,45 @@ class: center, middle
 * Each test runs in a new browser window
 * Results are stored in `localStorage`
 * Eventually led to fixes in v8
-
 ---
 # Staying in Shape
 
 Example:
 
 ```javascript
-class Thing {
-  constructor() {
-    this.x = 1;
-    this.y = 2;
-  }
-}
 
-let a = new Thing();
-let b = new Thing();
-let c = new Thing();
+let a = { name: 'alice', age: 40 };
+let b = { name: 'bob', age: 44 };
+
+// good! engines will notice the same shape and optimize property access
+
 ```
 ---
 # Staying in Shape (pt 2.)
 ```javascript
-let a = new Thing();
-let b = new Thing();
-let c = new Thing();
 
-c.z = 3;
+let a = { name: 'alice', age: 40 };
+let b = { name: 'bob', age: 44 };
+let c = { name: 'daniella', age: 41, favColor: 'yellow' }; // bad!
 ```
 
 * `c` no longer has the same shape as `a` and `b`
-* JS engine will try to be smart about it
+* Property access is now slower
+---
+# Staying in Shape (pt 3.)
+* Whenever possible declare your object shapes in advance
+* Don't use object instances to pass data you'll only need in some situations.
+
+```javascript
+let user = { id: 123, name: 'tim'  };
+
+function selectUser(u) {
+  u.selected = true;
+}
+```
+
+* `u.selected` now exists on some users but not others.
+* `selected` is a concern of the UX not the user. Move that state to a component.
 
 ---
 # Discourse Early Days - `StringBuffer`
@@ -127,7 +145,7 @@ class: center, middle
 <img src="rocket.png">
 ---
 # Our "Hot Path"
-* A post stream is an infinitely scrolling list of posts
+* A [post stream](https://meta.discourse.org/t/embedding-a-list-of-discourse-topics-in-another-site/125911) is an infinitely scrolling list of posts
   * A post has a 15+ controls
   * A post has a list of links
 * This could easily be 400+ components to initially render
@@ -151,6 +169,13 @@ class: center, middle
 * Replaces Handlebars templates with Javascript classes
 * Bubbles actions up into Ember
 * Leverages the Ember run loop for coalescing and scheduling updates
+---
+# Transforming Shape
+* Goes through a [transform](https://github.com/discourse/discourse/blob/master/app/assets/javascripts/discourse/lib/transform-post.js.es6) phase, where we take `Topic` and `Posts` heavy objects
+  and create new shapes for the render path.
+* The new shapes cannot be updated or trigger updates and are read only.
+* The render pipeline has the same property each time, which makes a noticeable
+  difference in perf.
 ---
 # Major Downside: Uglier and Harder to write
 
