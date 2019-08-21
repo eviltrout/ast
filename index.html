@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>A Javascript Performance Puzzle</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <style type="text/css">
+      @import url(/vendor/yan.css);
+      @import url(/vendor/droid.css);
+      @import url(/vendor/ubuntu.css);
+
+      body { font-family: 'Droid Serif'; }
+      h1, h2, h3 {
+        font-family: 'Yanone Kaffeesatz';
+        font-weight: normal;
+      }
+      .remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
+
+      img {
+        width: 40%;
+      }
+
+      img.thx {
+        width: 20%;
+      }
+
+      li {
+        font-size: 1.5em;
+        margin-bottom: 0.5em;
+
+      }
+      li li {
+        font-size: 1em;
+      }
+    </style>
+  </head>
+  <body>
+    <textarea id="source">
+
+class: center, middle
+
+# A Javascript Performance Puzzle
+## @eviltrout
+## https://eviltrout.com
+---
+# Discourse
+* Open Source Forum Software
+* Founded in 2012, still under very active development
+* Co-Founded with Stack Overflow alum Jeff Atwood (@codinghorror) and Sam Saffron
+* Opinionated and Focused
+* At least 20k active installations
+* You've probably used it!
+---
+# Our Stack
+* Ruby on Rails (REST API)
+* Ember.js
+* ... and lots of custom stuff
+---
+# Discourse's Client Performance History
+* Been running Ember.js since pre 1.0
+* Client performance used to be more challenging
+* Most of the time now we don't worry about it as much
+---
+# Most JS Peformance is Common Sense
+* Do less work
+* Allocate less things
+* Clean up after yourself
+* Measure speed over and over (JIT is tempermental)
+---
+# Ember Performance Suite
+
+* Following feedback from Ember core, we created [emberperf.eviltrout.com](http://emberperf.eviltrout.com).
+* Each test runs in a new browser window
+* Results are stored in `localStorage`
+* Eventually led to fixes in v8
+
+---
+# Staying in Shape
+
+Example:
+
+```javascript
+class Thing {
+  constructor() {
+    this.x = 1;
+    this.y = 2;
+  }
+}
+
+let a = new Thing();
+let b = new Thing();
+let c = new Thing();
+```
+---
+# Staying in Shape (pt 2.)
+```javascript
+let a = new Thing();
+let b = new Thing();
+let c = new Thing();
+
+c.z = 3;
+```
+
+* `c` no longer has the same shape as `a` and `b`
+* JS engine will try to be smart about it
+
+---
+# Discourse Early Days - `StringBuffer`
+* Components implement a `render(buffer)` method
+* Call `buffer.push()` with string content
+* Lazy evaluation of string concatenation
+* Worked reasonably well, was fast
+---
+# String vs DOM Templates
+* JS Frameworks were divided between String and DOM templates
+* Strings were the fastest way of rendering content
+  * Eventually surpassed by Virtual DOM techniques (React)
+---
+# HTMLBars + Glimmer VM
+* Ember Team focused on improving rendering performance
+* There were some missteps, but eventually things become good!
+* The Glimmer VM compiles templates into a series of rendering instructions
+  * Instructions can re-render only parts of the template that changes
+  * Faster than virtual DOM depending on the workload (no diff step)
+---
+class: center, middle
+# We still wanted to go faster!
+<img src="rocket.png">
+---
+# Our "Hot Path"
+* A post stream is an infinitely scrolling list of posts
+  * A post has a 15+ controls
+  * A post has a list of links
+* This could easily be 400+ components to initially render
+  on large topics with more added as you scrolled
+---
+# Under the Hood: The Object Model
+* Each component is an `@ember/object`
+* `@ember/object` instance supports bound data, computed properties and observers
+* These are awesome features but they come at a cost
+* The more bound data you have, the more work Ember has to
+  do to wire up updates and the slower it goes
+---
+# Crazy Idea
+* What if we knew our exact data flow and when re-rendering needed to happen?
+* That's where having many years of experience on one project really helps!
+* We could trade flexibility and ease of coding for speed
+---
+# Discourse Widgets
+* A lightweight wrapper on the open source [virtual-dom](https://github.com/Matt-Esch/virtual-dom) library
+* Less than 300 LOC
+* Replaces Handlebars templates with Javascript classes
+* Bubbles actions up into Ember
+* Leverages the Ember run loop for coalescing and scheduling updates
+---
+# Major Downside: Uglier and Harder to write
+
+Handlebars
+```handlebars
+<div class='post'>
+  <div class='post-body'>
+    {{post.body}}
+  </div>
+</div>
+```
+
+Discourse Widget
+```javascript
+import { h } from 'virtual-dom';
+
+createWidget('post', {
+  tagName: 'div.post',
+  html(attrs) {
+    return h('div.post-body', attrs.body);
+  }
+});
+```
+---
+class: center, middle
+# What if there was a better way?
+<img src="thinking.png">
+---
+# A Glimmer of hope
+
+* Ember's underpinnings are the Glimmer VM
+
+* Glimmer takes Handlebars templates, and creates an AST
+  and eventually a wire format
+
+* Could we leverage this?
+---
+# Abstract Syntax Trees
+
+* They sound super computer-sciencey and that's scary, but
+  they're not that complicated.
+
+* Compiler takes your text file (handlebars) and emits a
+  series of objects that represent your program.
+
+* Once it's done that hard part, you can write code that
+  goes through the objects and does stuff that you want to do.
+---
+# Retrieving an AST
+
+```javascript
+import PreProcessor from '@glimmer/syntax';
+
+let compiled = PreProcessor.preprocess("hello {{name}}");
+
+{
+  type: "Program",
+  body: [
+    {
+      type: 'TextNode',
+      chars: 'hello ',
+    },
+    {
+      type: 'MustacheStatement',
+      path: {
+        type: 'PathExpression',
+        original: 'name'
+      }
+    },
+  ]
+}
+```
+---
+class: center, middle
+# Now that you have a template in Javascript, you can change it!
+<img src="smile.png">
+---
+# Fun Ideas!
+
+* Lint your templates to find untranslated strings
+
+* Replace dynamic content with static content when compiled
+  for performance.  (font awesome icons for example)
+
+* The possibilities are endless!
+---
+# Discourse's Approach
+
+* Retrieve AST from Handlebars template
+
+* Loop through the nodes, run a `switch` statement on the
+  type of node, transpile code to target Discourse's
+  widget library
+
+* About 250 SLOC total
+
+* Source Code: [lib/javascripts/widget-hbs-compiler.js.es6](https://github.com/discourse/discourse/blob/master/lib/javascripts/widget-hbs-compiler.js.es6)
+---
+# Internals
+
+Input:
+
+```hbs
+hello <span>{{attrs.name}}</span>
+```
+
+Output:
+
+```javascript
+function(attrs, state) {
+  var _r = [];
+  _r.push("hello ");
+  var _a0 = [];
+  _a0.push(attrs.name)
+  _r.push(virtualDom.h('span', _a0));
+  return _r;
+}
+```
+
+---
+# Usage Example
+
+```javascript
+createWidget('post-link-arrow', {
+  tagName: 'div.post-link-arrow',
+
+  template: hbs`
+    {{#if attrs.above}}
+      <a class="post-info arrow" title={{i18n "topic.jump_reply_up"}}>
+        {{d-icon "arrow-up"}}
+      </a>
+    {{else}}
+      <a class="post-info arrow" title={{i18n "topic.jump_reply_down"}}>
+        {{d-icon "arrow-down"}}
+      </a>
+    {{/if}}
+  `
+});
+```
+---
+# Success!
+
+* We leverage Ember's code and compiler
+
+* Our developers don't need to learn a new way to write templates
+
+* It's very fast
+
+* It gives us an upgrade path to pure Ember in the future
+---
+# VMs are just fancy case statements
+
+* Don't be afraid of leveraging them
+
+* I'm a compsci dropout. If I can do this anyone can!
+
+* Build up your toolbox
+
+* Learn your program's flow and identify the hot path
+---
+class: center, middle
+# Thanks!
+<img src="thanks.png" class='thx'>
+### Emoji by [EmojiOne](http://emojione.com/)
+    </textarea>
+    <script src="/vendor/remark-latest.min.js">
+    </script>
+    <script>
+      remark.create();
+    </script>
+  </body>
+</html>
+
